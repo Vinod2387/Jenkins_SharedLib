@@ -1,27 +1,233 @@
-# Jenkins Shared Library
-- Shared libraries in Jenkins Pipelines are reusable pieces of code that can be organized into functions and classes.
-- These libraries allow you to encapsulate common logic, making it easier to maintain and share across multiple pipelines and projects.
-- Shared library must be inside the **vars** directory in your github repository
-- Shared library uses **groovy** syntax and file name ends with **.groovy** extension. 
+## 🧾 Jenkins Shared Library Cheat Sheet
 
-#
-## How to create and use shared library in Jenkins.
+### 📁 Shared Library Structure
 
-### How to create Shared library
-- Login to your Jenkins dashboard. <a href="">Jenkins Installation</a>
-- Go to **Manage Jenkins** --> **System** and search for **Global Trusted Pipeline Libraries**.
-<img src="https://github.com/DevMadhup/Jenkins_SharedLib/blob/main/assests/Sharedlib-config-1.png" />
+```
+(root)
+├── vars/
+│   ├── code_checkout.groovy
+│   ├── docker_build.groovy
+│   ├── docker_push.groovy
+│   ├── owasp_dependency.groovy
+│   ├── sonarqube_analysis.groovy
+│   ├── sonarqube_code_quality.groovy
+│   ├── trivy_scan.groovy
+│   └── docker_compose.groovy
+├── src/                           # Optional - for custom classes
+├── resources/                     # Optional - for templated files
+```
 
-  **Name:** Shared <br>
-  **Default version:** \<branch name><br>
-  **Project repository:** https://github.com/DevMadhup/Jenkins_SharedLib.git <br>
-****
-<img src="https://github.com/DevMadhup/Jenkins_SharedLib/blob/main/assests/Sharedlib-config-2.png" />
+### 🧪 Usage in Jenkinsfile
 
-#
-### How to use it in Jenkins pipeline
-- Go to your declarative pipeline
-- Add **@Library('Shared') _** at the very first line of your jenkins pipeline.
-<img src="https://github.com/DevMadhup/Jenkins_SharedLib/blob/main/assests/shared-lib-in-pipeline.png" />
+```groovy
+@Library('your-shared-library') _
 
-**Note:** @Library() _ is the syntax to use shared library.
+pipeline {
+    agent any
+    stages {
+        stage('Checkout') {
+            steps {
+                script {
+                    code_checkout("<GitRepo>", "<Branch>")
+                }
+            }
+        }
+    }
+}
+```
+
+---
+
+## 🔁 Common Function Templates in `vars/` and Their Pipeline Usage
+
+### 1. `vars/code_checkout.groovy`
+
+```groovy
+// vars/code_checkout.groovy
+
+def call(String GitUrl, String GitBranch) {
+    git url: "${GitUrl}", branch: "${GitBranch}"
+}
+```
+
+**Pipeline Usage:**
+```groovy
+stage('Git: Code Checkout') {
+    steps {
+        script {
+            code_checkout("https://github.com/example/repo.git", "main")
+        }
+    }
+}
+```
+
+### 2. `vars/docker_build.groovy`
+
+```groovy
+// vars/docker_build.groovy
+
+def call(String ProjectName, String ImageTag, String DockerHubUser) {
+    sh "docker build -t ${DockerHubUser}/${ProjectName}:${ImageTag} ."
+}
+```
+
+**Pipeline Usage:**
+```groovy
+stage("Docker: Build Images") {
+    steps {
+        script {
+            dir('backend') {
+                docker_build("my-backend", "${params.BACKEND_DOCKER_TAG}", "mydockeruser")
+            }
+            dir('frontend') {
+                docker_build("my-frontend", "${params.FRONTEND_DOCKER_TAG}", "mydockeruser")
+            }
+        }
+    }
+}
+```
+
+### 3. `vars/docker_push.groovy`
+
+```groovy
+// vars/docker_push.groovy
+
+def call(String Project, String ImageTag, String dockerhubuser) {
+    withCredentials([usernamePassword(credentialsId: 'docker', passwordVariable: 'dockerhubpass', usernameVariable: 'dockerhubuser')]) {
+        sh "docker login -u ${dockerhubuser} -p ${dockerhubpass}"
+    }
+    sh "docker push ${dockerhubuser}/${Project}:${ImageTag}"
+}
+```
+
+**Pipeline Usage:**
+```groovy
+stage("Docker: Push to DockerHub") {
+    steps {
+        script {
+            docker_push("my-backend", "${params.BACKEND_DOCKER_TAG}", "mydockeruser")
+            docker_push("my-frontend", "${params.FRONTEND_DOCKER_TAG}", "mydockeruser")
+        }
+    }
+}
+```
+
+### 4. `vars/owasp_dependency.groovy`
+
+```groovy
+// vars/owasp_dependency.groovy
+
+def call() {
+    dependencyCheck additionalArguments: '--scan ./', odcInstallation: 'OWASP'
+    dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+}
+```
+
+**Pipeline Usage:**
+```groovy
+stage("OWASP: Dependency check") {
+    steps {
+        script {
+            owasp_dependency()
+        }
+    }
+}
+```
+
+### 5. `vars/sonarqube_analysis.groovy`
+
+```groovy
+// vars/sonarqube_analysis.groovy
+
+def call(String SonarQubeAPI, String Projectname, String ProjectKey) {
+    withSonarQubeEnv("${SonarQubeAPI}") {
+        sh "$SONAR_HOME/bin/sonar-scanner -Dsonar.projectName=${Projectname} -Dsonar.projectKey=${ProjectKey} -X"
+    }
+}
+```
+
+**Pipeline Usage:**
+```groovy
+stage("SonarQube: Code Analysis") {
+    steps {
+        script {
+            sonarqube_analysis("Sonar", "myproject", "myproject")
+        }
+    }
+}
+```
+
+### 6. `vars/sonarqube_code_quality.groovy`
+
+```groovy
+// vars/sonarqube_code_quality.groovy
+
+def call() {
+    timeout(time: 1, unit: "MINUTES") {
+        waitForQualityGate abortPipeline: false
+    }
+}
+```
+
+**Pipeline Usage:**
+```groovy
+stage("SonarQube: Code Quality Gate") {
+    steps {
+        script {
+            sonarqube_code_quality()
+        }
+    }
+}
+```
+
+### 7. `vars/trivy_scan.groovy`
+
+```groovy
+// vars/trivy_scan.groovy
+
+def call() {
+    sh "trivy fs ."
+}
+```
+
+**Pipeline Usage:**
+```groovy
+stage("Trivy: Filesystem scan") {
+    steps {
+        script {
+            trivy_scan()
+        }
+    }
+}
+```
+
+### 8. `vars/docker_compose.groovy`
+
+```groovy
+// vars/docker_compose.groovy
+
+def call() {
+    sh "docker-compose down && docker-compose up -d"
+}
+```
+
+**Pipeline Usage:**
+```groovy
+stage("Docker Compose: Deploy") {
+    steps {
+        script {
+            docker_compose()
+        }
+    }
+}
+```
+
+---
+
+## 💡 Tips for Remembering
+
+- Start your own function name map (`code_checkout`, `docker_push`, etc.)
+- Keep one task per Groovy file (single `call()` function)
+- Match function names to stage names in `Jenkinsfile`
+- Use `script {}` block when calling shared lib methods in pipeline
+- Use descriptive stage names to match library functions
