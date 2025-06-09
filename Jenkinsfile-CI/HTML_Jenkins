@@ -1,0 +1,117 @@
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'BACKEND_DOCKER_TAG', defaultValue: 'v1', description: 'Backend Docker image tag')
+        string(name: 'FRONTEND_DOCKER_TAG', defaultValue: 'v1', description: 'Frontend Docker image tag')
+    }
+
+    def call(String GitUrl, String GitBranch) {
+        git url: "${GitUrl}", branch: "${GitBranch}"
+    }
+
+    stages {
+
+        stage('Git: Code Checkout') {
+            steps {
+                script {
+                    code_checkout("https://github.com/Vinod2387/Wanderlust-Mega-Project.git", "main")
+                }
+            }
+        }
+
+        def call() {
+            dependencyCheck additionalArguments: '--scan ./', odcInstallation: 'OWASP'
+            dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+        }
+
+        stage("OWASP: Dependency check") {
+            steps {
+                script {
+                    owasp_dependency()
+                }
+            }
+        }
+
+        def call(String SonarQubeAPI, String Projectname, String ProjectKey) {
+            withSonarQubeEnv("${SonarQubeAPI}") {
+                sh "$SONAR_HOME/bin/sonar-scanner -Dsonar.projectName=${Projectname} -Dsonar.projectKey=${ProjectKey} -X"
+            }
+        }
+
+        stage("SonarQube: Code Analysis") {
+            steps {
+                script {
+                    sonarqube_analysis("Sonar", "wanderlust", "wanderlust")
+                }
+            }
+        }
+
+        def call() {
+            timeout(time: 1, unit: "MINUTES") {
+                waitForQualityGate abortPipeline: false
+            }
+        }
+
+        stage("SonarQube: Code Quality Gate") {
+            steps {
+                script {
+                    sonarqube_code_quality()
+                }
+            }
+        }
+
+        def call() {
+            sh "trivy fs ."
+        }
+
+        stage("Trivy: Filesystem scan") {
+            steps {
+                script {
+                    trivy_scan()
+                }
+            }
+        }
+
+        def call(String ProjectName, String ImageTag, String DockerHubUser) {
+            sh "docker build -t ${DockerHubUser}/${ProjectName}:${ImageTag} ."
+        }
+
+        stage("Docker: Build Images") {
+            steps {
+                script {
+                    dir('backend') {
+                        docker_build("wanderlust-backend-beta", "${params.BACKEND_DOCKER_TAG}", "trainwithshubham")
+                    }
+                    dir('frontend') {
+                        docker_build("wanderlust-frontend-beta", "${params.FRONTEND_DOCKER_TAG}", "trainwithshubham")
+                    }
+                }
+            }
+        }
+
+        def call(String Project, String ImageTag, String dockerhubuser) {
+            withCredentials([usernamePassword(credentialsId: 'docker', passwordVariable: 'dockerhubpass', usernameVariable: 'dockerhubuser')]) {
+                sh "docker login -u ${dockerhubuser} -p ${dockerhubpass}"
+            }
+            sh "docker push ${dockerhubuser}/${Project}:${ImageTag}"
+        }
+
+        stage("Docker: Push to DockerHub") {
+            steps {
+                script {
+                    docker_push("wanderlust-backend-beta", "${params.BACKEND_DOCKER_TAG}", "trainwithshubham")
+                    docker_push("wanderlust-frontend-beta", "${params.FRONTEND_DOCKER_TAG}", "trainwithshubham")
+                }
+            }
+        }
+
+        stage("Docker Compose: Deploy") {
+            steps {
+                script {
+                    docker_compose()
+                }
+            }
+        }
+    }
+}
